@@ -17,7 +17,7 @@ const app = express();
 const { sendEmail } = require("./email");
 const { SESClient, SendEmailCommand } = require("@aws-sdk/client-ses");
 
-const ses = new SESClient({ region: "us-west-2" }); // or your SES region
+const ses = new SESClient({ region: process.env.AWS_REGION || "us-west-2" }); // use env region if provided
 
 const { v4: uuidv4 } = require("uuid");
 const crypto = require("crypto");
@@ -1229,6 +1229,117 @@ app.post("/change-password", async (req, res) => {
     res.json({
       message: "Password updated. Please login with your new password.",
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Password Reset Flow
+// 1) Request reset: send email with link (DEV: return link in response)
+app.post("/password-reset/request", async (req, res) => {
+  try {
+    const { email } = req.body || {};
+    if (!email) return res.status(400).json({ error: "Missing email" });
+    const user = await getUserByEmail(email);
+    // Always respond 200 to avoid user enumeration (but only proceed if user exists & enabled)
+    if (!user || user.disabled) {
+      return res.json({ message: "If the account exists, a reset link has been sent." });
+    }
+    const token = jwt.sign(
+      { email, purpose: "pwreset" },
+      process.env.JWT_SECRET,
+      { expiresIn: "30m" }
+    );
+    const base = process.env.FRONTEND_BASE_URL || "";
+    const resetLink = base
+      ? `${base.replace(/\/$/, "")}/reset-password?token=${encodeURIComponent(token)}`
+      : `/reset-password?token=${encodeURIComponent(token)}`;
+    // Send via Amazon SES
+  const from = process.env.EMAIL_FROM || process.env.SUPPORT_EMAIL;
+    if (!from) {
+      console.warn("EMAIL_FROM not set; falling back to console log");
+      console.log("[Password Reset] Link for", email, "=>", resetLink);
+    } else {
+      const subject = "Reset your Counselor Notes password";
+      const html = `
+        <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+          <h2>Reset your password</h2>
+          <p>We received a request to reset your password. Click the button below to set a new password. This link expires in 30 minutes.</p>
+          <p style="margin:24px 0;"><a href="${resetLink}" style="background:#2563eb;color:#fff;padding:12px 16px;border-radius:8px;text-decoration:none;display:inline-block">Reset Password</a></p>
+          <p>If the button doesn't work, copy and paste this URL into your browser:</p>
+          <p><a href="${resetLink}">${resetLink}</a></p>
+          <p>If you didn't request this, you can ignore this email.</p>
+        </div>`;
+      await ses.send(
+        new SendEmailCommand({
+          Source: from,
+          Destination: { ToAddresses: [email] },
+          Message: {
+            Subject: { Data: subject },
+            Body: {
+              Html: { Data: html },
+              Text: {
+                Data: `Reset your password: ${resetLink}\n\nThis link expires in 30 minutes. If you didn't request this, you can ignore this email.`,
+              },
+            },
+          },
+        })
+      );
+    }
+
+    return res.json({ message: "If the account exists, a reset link has been sent." });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2) Confirm reset with token and new password
+app.post("/password-reset/confirm", async (req, res) => {
+  try {
+    const { token, newPassword } = req.body || {};
+    if (!token || !newPassword)
+      return res.status(400).json({ error: "Missing token or password" });
+    let payload;
+    try {
+      payload = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (e) {
+      return res.status(400).json({ error: "Invalid or expired token" });
+    }
+    if (payload.purpose !== "pwreset" || !payload.email) {
+      return res.status(400).json({ error: "Invalid token" });
+    }
+    const user = await getUserByEmail(payload.email);
+    if (!user || user.disabled) {
+      return res.status(404).json({ error: "User not found or disabled" });
+    }
+    if (!isStrongPassword(newPassword)) {
+      return res.status(400).json({
+        error:
+          "Password must be at least 12 characters and include uppercase, lowercase, number, and special character.",
+      });
+    }
+    const newHash = await hashPassword(newPassword);
+    await db.send(
+      new UpdateCommand({
+        TableName: "Users",
+        Key: { email: payload.email },
+        UpdateExpression: "set #pwd = :p",
+        ExpressionAttributeNames: { "#pwd": "password" },
+        ExpressionAttributeValues: { ":p": newHash },
+      })
+    );
+    try {
+      await logAudit({
+        userEmail: payload.email,
+        action: "PASSWORD_RESET",
+        req,
+        displayName:
+          user?.firstName && user?.lastName
+            ? `${user.firstName} ${user.lastName}`
+            : undefined,
+      });
+    } catch {}
+    res.json({ message: "Password reset successful. You can now log in." });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
