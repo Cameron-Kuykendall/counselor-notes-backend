@@ -1,0 +1,18 @@
+# Ignore frontend
+counselor-frontend/
+
+# Ignore dev-only files
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Ignore build artifacts
+*.zip
+*.tar.gz
+
+# Ignore git & editor junk
+.git/
+.gitignore
+.DS_Store
+.vscode/
+.idea/

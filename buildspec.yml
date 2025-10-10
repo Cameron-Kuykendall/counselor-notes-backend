@@ -1,0 +1,18 @@
+version: 0.2
+
+phases:
+  install:
+    commands:
+      - echo "Installing dependencies..."
+      - npm ci
+  build:
+    commands:
+      - echo "Building backend for deployment..."
+      - npm run build || echo "No build script - skipping"
+  post_build:
+    commands:
+      - echo "Preparing deployment package..."
+artifacts:
+  files:
+    - "**/*"
+  discard-paths: no
