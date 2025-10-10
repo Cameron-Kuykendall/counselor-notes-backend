@@ -5,16 +5,14 @@ phases:
     runtime-versions:
       nodejs: 18
     commands:
-      - echo "Installing dependencies with npm install..."
+      - echo "Installing dependencies..."
       - npm install
   build:
     commands:
-      - echo "Building application..."
-      - npm run build || echo "No build step defined"
-  post_build:
-    commands:
-      - echo "Build completed successfully."
+      - echo "Building app..."
+      - npm run build || echo "No build step required"
+      - zip -r app.zip * .[^.]* # zips everything including hidden files
 artifacts:
   files:
-    - "**/*"
+    - app.zip
   base-directory: .
