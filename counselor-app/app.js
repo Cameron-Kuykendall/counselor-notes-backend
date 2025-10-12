@@ -617,90 +617,53 @@ function require2FA() {
   };
 }
 
-// Verify Email Route (token-based)
+// ✅ Verify Email Route (token-based, updated to verify first then redirect)
 app.get("/verify-email", async (req, res) => {
   const { token } = req.query;
-  // If a user clicks the email link and hits the API domain directly, redirect them to the
-  // frontend's /verify-email page so they see a proper UI instead of raw JSON.
   const redirectBase = (
     process.env.VERIFY_REDIRECT_BASE ||
     process.env.FRONTEND_BASE_URL ||
     process.env.VERIFY_BASE_URL ||
-    ""
+    "https://www.counselornotes.com"
   ).replace(/\/$/, "");
-  const wantsHTML = req.accepts(["html", "json"]) === "html";
-  if (token && redirectBase && wantsHTML && req.query.noredirect !== "1") {
-    try {
-      const target = new URL(redirectBase);
-      const currentHost = req.get("host");
-      // Only redirect if the target host is different to avoid loops (e.g., redirecting API -> API)
-      if (target.host && target.host !== currentHost) {
-        return res.redirect(
-          302,
-          `${redirectBase}/verify-email?token=${encodeURIComponent(token)}`
-        );
-      }
-      // Same host; skip redirect to avoid loop and proceed with JSON handling below
-    } catch (_) {
-      // Malformed URL in env; skip redirect and proceed
-    }
-  }
+
   if (!token) return res.status(400).json({ error: "Missing token" });
+
   let email;
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET || "devsecret");
     email = payload.email;
   } catch (err) {
-    if (wantsHTML) {
-      const loginBase = redirectBase || "";
-      const loginHref = loginBase
-        ? `${loginBase.replace(/\/$/, "")}/login`
-        : "/";
-      return res
-        .status(400)
-        .send(
-          `<!doctype html><html><head><meta charset="utf-8"><title>Verification Error</title><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;background:#0a0a0a;color:#f5f5f5"><div style="max-width:640px;margin:48px auto;padding:24px;background:#111;border-radius:12px;border:1px solid #222;"><h1 style="margin-top:0">Email Verification</h1><p>Invalid or expired token.</p><p><a href="${loginHref}" style="color:#8ab4f8;text-decoration:none;font-weight:600">Back to Login</a></p></div></body></html>`
-        );
-    }
     return res.status(400).json({ error: "Invalid or expired token" });
   }
-  // Get user and check token matches
+
+  // ✅ Check user record
   const getParams = {
     TableName: "Users",
     Key: { email },
   };
+
   try {
     const data = await db.send(new GetCommand(getParams));
     const user = data.Item;
-    if (!user || user.verified) {
-      if (wantsHTML) {
-        const loginBase = redirectBase || "";
-        const loginHref = loginBase
-          ? `${loginBase.replace(/\/$/, "")}/login`
-          : "/";
-        return res
-          .status(400)
-          .send(
-            `<!doctype html><html><head><meta charset="utf-8"><title>Verification Error</title><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;background:#0a0a0a;color:#f5f5f5"><div style="max-width:640px;margin:48px auto;padding:24px;background:#111;border-radius:12px;border:1px solid #222;"><h1 style="margin-top:0">Email Verification</h1><p>Invalid or already verified.</p><p><a href="${loginHref}" style="color:#8ab4f8;text-decoration:none;font-weight:600">Back to Login</a></p></div></body></html>`
-          );
-      }
-      return res.status(400).json({ error: "Invalid or already verified" });
+
+    if (!user) {
+      return res.status(400).json({ error: "User not found" });
     }
+    if (user.verified) {
+      return res.status(200).send(
+        `<!doctype html><html><body style="font-family:sans-serif;background:#0a0a0a;color:#f5f5f5;text-align:center;padding:40px;">
+          <h2>Email Already Verified</h2>
+          <p><a href="${redirectBase}/login" style="color:#8ab4f8;">Go to Login</a></p>
+        </body></html>`
+      );
+    }
+
+    // ✅ Verify and remove token
     if (user.verificationToken !== token) {
-      if (wantsHTML) {
-        const loginBase = redirectBase || "";
-        const loginHref = loginBase
-          ? `${loginBase.replace(/\/$/, "")}/login`
-          : "/";
-        return res
-          .status(400)
-          .send(
-            `<!doctype html><html><head><meta charset="utf-8"><title>Verification Error</title><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;background:#0a0a0a;color:#f5f5f5"><div style="max-width:640px;margin:48px auto;padding:24px;background:#111;border-radius:12px;border:1px solid #222;"><h1 style="margin-top:0">Email Verification</h1><p>Token mismatch.</p><p><a href="${loginHref}" style="color:#8ab4f8;text-decoration:none;font-weight:600">Back to Login</a></p></div></body></html>`
-          );
-      }
       return res.status(400).json({ error: "Token mismatch" });
     }
-    // Mark as verified and remove token
+
     const updateParams = {
       TableName: "Users",
       Key: { email },
@@ -708,31 +671,21 @@ app.get("/verify-email", async (req, res) => {
       ExpressionAttributeValues: { ":v": true },
     };
     await db.send(new UpdateCommand(updateParams));
-    if (wantsHTML) {
-      const loginBase = redirectBase || "";
-      const loginHref = loginBase
-        ? `${loginBase.replace(/\/$/, "")}/login`
-        : "/";
-      return res.send(
-        `<!doctype html><html><head><meta charset="utf-8"><title>Email Verified</title><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;background:#0a0a0a;color:#f5f5f5"><div style="max-width:640px;margin:48px auto;padding:24px;background:#111;border-radius:12px;border:1px solid #222;"><h1 style="margin-top:0">Email Verified</h1><p>Your email has been verified successfully.</p><p><a href="${loginHref}" style="color:#8ab4f8;text-decoration:none;font-weight:600">Go to Login</a></p></div></body></html>`
-      );
-    }
-    res.json({ message: "Email verified." });
+
+    console.log(`✅ Email verified for ${email}`);
+
+    // ✅ Redirect AFTER successful verification
+    return res.redirect(
+      302,
+      `${redirectBase}/verify-email-success?email=${encodeURIComponent(email)}`
+    );
+
   } catch (err) {
-    if (wantsHTML) {
-      const loginBase = redirectBase || "";
-      const loginHref = loginBase
-        ? `${loginBase.replace(/\/$/, "")}/login`
-        : "/";
-      return res
-        .status(500)
-        .send(
-          `<!doctype html><html><head><meta charset="utf-8"><title>Server Error</title><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;background:#0a0a0a;color:#f5f5f5"><div style="max-width:640px;margin:48px auto;padding:24px;background:#111;border-radius:12px;border:1px solid #222;"><h1 style="margin-top:0">Server Error</h1><p>Something went wrong. Please try again later.</p><p><a href="${loginHref}" style="color:#8ab4f8;text-decoration:none;font-weight:600">Back to Login</a></p></div></body></html>`
-        );
-    }
-    res.status(500).json({ error: err.message });
+    console.error("Verification error:", err);
+    return res.status(500).json({ error: "Internal server error" });
   }
 });
+
 
 // =====================
 // SHARED TODO ITEMS (per school)
