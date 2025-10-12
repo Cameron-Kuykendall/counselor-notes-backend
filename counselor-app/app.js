@@ -732,13 +732,11 @@ app.get("/verify-email", async (req, res) => {
       302,
       `${redirectBase}/verify-email-success?email=${encodeURIComponent(email)}`
     );
-
   } catch (err) {
     console.error("Verification error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
-
 
 // =====================
 // SHARED TODO ITEMS (per school)
