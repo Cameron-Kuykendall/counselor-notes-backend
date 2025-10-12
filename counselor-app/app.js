@@ -362,16 +362,15 @@ app.post("/signup", async (req, res) => {
     // Send email with verification link containing the token
     let verificationEmailSent = false;
     try {
-      // Prefer explicit frontend base so verification opens the React page directly
-      const baseUrl = (
-        process.env.FRONTEND_BASE_URL ||
-        process.env.VERIFY_REDIRECT_BASE ||
-        process.env.VERIFY_BASE_URL ||
-        `${req.protocol}://${req.get("host")}`
-      ).replace(/\/$/, "");
-      const verifyUrl = `${baseUrl}/verify-email?token=${encodeURIComponent(
-        verificationToken
-      )}`;
+
+      // Use API domain directly to avoid CORS and redirect loops
+      const apiBase =
+        process.env.API_BASE_URL || "https://api.counselornotes.com";
+      const verifyUrl = `${apiBase.replace(
+        /\/$/,
+        ""
+      )}/verify-email?token=${encodeURIComponent(verificationToken)}`;
+
       const subject = "Verify your Counselor Notes account";
       const bodyText = `Welcome to Counselor Notes!\n\nPlease verify your email by visiting:\n${verifyUrl}\n\nIf you didn't request this, please ignore this email.`;
       const bodyHtml = `
@@ -388,7 +387,6 @@ app.post("/signup", async (req, res) => {
     res.status(201).json({
       message: "User created. Please verify your email.",
       verificationEmailSent,
-      verificationToken, // For development/testing only; remove in production
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
