@@ -287,24 +287,9 @@ async function getUserByEmail(email) {
 // Signup Route (now collects phone and mfaMethod, and restricts to approved emails and valid schoolCode)
 const APPROVED_EMAIL_DOMAINS = ["corvallis.k12.or.us", "gmail.com"];
 app.post("/signup", async (req, res) => {
-  const {
-    email,
-    password,
-    schoolCode,
-    phoneNumber,
-    mfaMethod,
-    firstName,
-    lastName,
-  } = req.body;
-  if (
-    !email ||
-    !password ||
-    !schoolCode ||
-    !phoneNumber ||
-    !mfaMethod ||
-    !firstName ||
-    !lastName
-  )
+  const { email, password, schoolCode, firstName, lastName } = req.body;
+  // We now default to TOTP for MFA and do not require phone numbers at signup
+  if (!email || !password || !schoolCode || !firstName || !lastName)
     return res.status(400).json({ error: "Missing fields" });
   // Restrict to approved domains
   const allowed = APPROVED_EMAIL_DOMAINS.some(
@@ -331,8 +316,8 @@ app.post("/signup", async (req, res) => {
   } catch (err) {
     return res.status(500).json({ error: "Error validating school code" });
   }
-  if (!["sms", "totp"].includes(mfaMethod))
-    return res.status(400).json({ error: "Invalid mfaMethod" });
+  // Force MFA method to TOTP for all new signups
+  const mfaMethod = "totp";
   const hashed = await hashPassword(password);
   // Generate a one-time verification token
   const verificationToken = jwt.sign(
@@ -350,11 +335,11 @@ app.post("/signup", async (req, res) => {
       lastName,
       verified: false,
       verificationToken,
-      phoneNumber,
+      phoneNumber: null,
       phoneVerified: false,
       totpSecret: null,
       totpVerified: false,
-      mfaMethod, // 'sms' or 'totp'
+      mfaMethod, // force 'totp'
     },
   };
   try {
