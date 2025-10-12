@@ -11,9 +11,7 @@ phases:
     commands:
       - echo "Building app..."
       - npm run build || echo "No build step required"
-      - zip -r app.zip * .[^.]* # zips everything including hidden files
 artifacts:
   files:
-    - app.zip
-  base-directory: .
-#
+    - '**/*'
+  discard-paths: no
