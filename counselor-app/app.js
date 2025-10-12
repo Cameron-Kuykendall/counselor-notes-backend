@@ -396,7 +396,7 @@ app.post("/signup", async (req, res) => {
 const speakeasy = require("speakeasy");
 const qrcode = require("qrcode");
 const { SNSClient, PublishCommand } = require("@aws-sdk/client-sns");
-const sns = new SNSClient({ region: "us-west-2" });
+const sns = new SNSClient({ region: process.env.AWS_REGION || "us-west-2" });
 const smsCodes = {};
 // S3 for presigned uploads/downloads
 const {
@@ -550,6 +550,59 @@ app.post("/verify-sms-code", async (req, res) => {
   );
   delete smsCodes[email];
   res.json({ message: "Phone verified" });
+});
+
+// Complete login by verifying SMS code and issuing JWT
+app.post("/mfa/sms-verify", async (req, res) => {
+  const { email, sessionId, code } = req.body;
+  if (!email || !sessionId || !code)
+    return res.status(400).json({ error: "Missing fields" });
+  try {
+    const user = await getUserByEmail(email);
+    if (!user) return res.status(404).json({ error: "User not found" });
+    if (user.mfaMethod !== "sms") {
+      return res.status(400).json({ error: "User not configured for SMS MFA" });
+    }
+    const entry = smsCodes[email];
+    if (!entry || entry.code !== code || entry.expires < Date.now()) {
+      return res.status(400).json({ error: "Invalid or expired code" });
+    }
+
+    // Mark session as MFA OK
+    await db.send(
+      new UpdateCommand({
+        TableName: "Sessions",
+        Key: { sessionId },
+        UpdateExpression: "set mfaOk = :m",
+        ExpressionAttributeValues: { ":m": true },
+      })
+    );
+
+    // Ensure user's phone is marked verified
+    if (!user.phoneVerified) {
+      await db.send(
+        new UpdateCommand({
+          TableName: "Users",
+          Key: { email },
+          UpdateExpression: "set phoneVerified = :v",
+          ExpressionAttributeValues: { ":v": true },
+        })
+      );
+    }
+
+    // Clear one-time code
+    delete smsCodes[email];
+
+    // Issue JWT for this session
+    const jwtToken = jwt.sign(
+      { email, schoolCode: user.schoolCode, role: user.role, sessionId },
+      process.env.JWT_SECRET,
+      { expiresIn: "1h" }
+    );
+    res.json({ token: jwtToken });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Setup TOTP (Google Authenticator) with QR code
@@ -1019,9 +1072,10 @@ app.post("/login", async (req, res) => {
     );
 
     const totpSetup = Boolean(user.totpSecret);
+    const method = user.mfaMethod === "sms" ? "sms" : "totp";
     res.json({
       mfaRequired: true,
-      method: "totp",
+      method,
       sessionId,
       email,
       totpSetup,
