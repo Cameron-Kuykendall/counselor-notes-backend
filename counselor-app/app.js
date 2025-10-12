@@ -362,7 +362,6 @@ app.post("/signup", async (req, res) => {
     // Send email with verification link containing the token
     let verificationEmailSent = false;
     try {
-
       // Use API domain directly to avoid CORS and redirect loops
       const apiBase =
         process.env.API_BASE_URL || "https://api.counselornotes.com";
@@ -1241,7 +1240,9 @@ app.post("/password-reset/request", async (req, res) => {
     const user = await getUserByEmail(email);
     // Always respond 200 to avoid user enumeration (but only proceed if user exists & enabled)
     if (!user || user.disabled) {
-      return res.json({ message: "If the account exists, a reset link has been sent." });
+      return res.json({
+        message: "If the account exists, a reset link has been sent.",
+      });
     }
     const token = jwt.sign(
       { email, purpose: "pwreset" },
@@ -1250,10 +1251,12 @@ app.post("/password-reset/request", async (req, res) => {
     );
     const base = process.env.FRONTEND_BASE_URL || "";
     const resetLink = base
-      ? `${base.replace(/\/$/, "")}/reset-password?token=${encodeURIComponent(token)}`
+      ? `${base.replace(/\/$/, "")}/reset-password?token=${encodeURIComponent(
+          token
+        )}`
       : `/reset-password?token=${encodeURIComponent(token)}`;
     // Send via Amazon SES
-  const from = process.env.EMAIL_FROM || process.env.SUPPORT_EMAIL;
+    const from = process.env.EMAIL_FROM || process.env.SUPPORT_EMAIL;
     if (!from) {
       console.warn("EMAIL_FROM not set; falling back to console log");
       console.log("[Password Reset] Link for", email, "=>", resetLink);
@@ -1285,7 +1288,9 @@ app.post("/password-reset/request", async (req, res) => {
       );
     }
 
-    return res.json({ message: "If the account exists, a reset link has been sent." });
+    return res.json({
+      message: "If the account exists, a reset link has been sent.",
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
